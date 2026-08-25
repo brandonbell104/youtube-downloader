@@ -23,3 +23,8 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Vendored Python runtime and packages (Scripts/fetch-python.sh)
+Vendor/
+YTDLPHub/Resources/python-stdlib/
+YTDLPHub/Resources/python-packages/

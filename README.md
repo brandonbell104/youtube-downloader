@@ -5,36 +5,48 @@ quality, and the video downloads into the app's library where it plays offline.
 
 Built with SwiftUI, targeting iOS 17 and later, iPhone and iPad.
 
-## The yt-dlp problem, and what this does instead
+## Three ways to get the media URLs
 
-yt-dlp is a command line program. iOS does not let an app spawn subprocesses or
-execute downloaded code, so **yt-dlp cannot run inside an iOS app** — not
-bundled, not compiled in, not via a Python runtime. Any App Store app that
-claims to "use yt-dlp" is either talking to a server, or doing the extraction
-itself in native code.
+yt-dlp is a command line program, and iOS does not let an app spawn
+subprocesses or execute downloaded code. So you cannot ship the yt-dlp
+*binary* and run it.
 
-This app does both, and you choose which:
+You can, however, **import yt-dlp as a library**. It is pure Python, so an
+embedded CPython interpreter that ships inside the app bundle — signed as part
+of the app, like any other framework — can import it and call it directly.
+That is roughly how a-Shell ships Python, and it is why yt-dlp already runs on
+iOS today.
 
-| | On-device extractor | yt-dlp bridge |
-|---|---|---|
-| Where extraction happens | On the iPhone | On a machine you run |
-| Setup | None | Run one Python script |
-| Sites | YouTube only | Everything yt-dlp supports |
-| Keeping up with YouTube | Needs an app update | `pip install -U yt-dlp` |
+The app has three resolvers and falls through them in order:
 
-The **on-device extractor** (`Services/InnerTube/`) asks YouTube's own playback
-API — the endpoint the official YouTube apps use — for the list of media files
-behind a video, then downloads them directly. Nothing leaves the device except
-the request to YouTube itself.
+| | Bundled yt-dlp | yt-dlp bridge | Built-in extractor |
+|---|---|---|---|
+| Where extraction runs | In the app, on device | A machine you run | In the app, on device |
+| Setup | One script before building | Run one Python script | None |
+| Sites | Everything yt-dlp supports | Everything yt-dlp supports | YouTube only |
+| Updating | Re-run script, rebuild | `pip install -U yt-dlp` | Needs an app update |
+| Adds to app size | ~40–60 MB | Nothing | Nothing |
 
-The **yt-dlp bridge** (`Services/RemoteResolver.swift`) hands the link to a
-copy of yt-dlp running somewhere that can execute it — a Mac, a Raspberry Pi, a
-home server — and gets back the same direct media URLs. Extraction happens
-there; the download still happens on the phone. `Server/ytdlp_hub_server.py` is
-the companion script, and it's about 150 lines.
+**Bundled yt-dlp** (`Services/EmbeddedPython/`) is the default and the one to
+prefer. `Scripts/fetch-python.sh` vendors a CPython runtime plus yt-dlp's
+source into the project; `YTDLPBridge.m` boots the interpreter and calls
+`ytdlp_bridge.resolve(url)` in-process. yt-dlp's self-update module is replaced
+with a stub during vendoring — that is the one part of yt-dlp that genuinely
+would violate iOS's rules, and it cannot work from a read-only bundle anyway.
 
-Downloading happens the same way in both cases, and neither one proxies your
-video through anything.
+**yt-dlp bridge** (`Services/RemoteResolver.swift`) hands the link to a copy of
+yt-dlp running elsewhere. Worth having when you'd rather update with `pip` than
+rebuild.
+
+**Built-in extractor** (`Services/InnerTube/`) asks YouTube's own playback API
+directly, in hand-written Swift. No setup and no size cost, but YouTube-only
+and the first thing to break when YouTube changes. It stays last as the
+fallback that always works.
+
+All three produce the same `ResolvedMedia`, and the download and merge pipeline
+is identical either way. Note that yt-dlp is used only for *extraction* here —
+the transfer happens through the app's own background downloader, and merging
+happens in AVFoundation, because there is no ffmpeg subprocess to call.
 
 ## What it does
 
@@ -54,16 +66,31 @@ video through anything.
 You need Xcode 16 or later and an Apple Developer account (a free one is enough
 to run it on your own device).
 
-1. `open YTDLPHub.xcodeproj`
-2. Select the **YTDLPHub** target → **Signing & Capabilities**
-3. Set your **Team**, and change the bundle identifier from
+1. **Vendor the Python runtime first** — the project links against it:
+
+   ```bash
+   ./Scripts/fetch-python.sh
+   ```
+
+   This downloads a CPython build for iOS, installs yt-dlp and certifi into
+   `YTDLPHub/Resources/python-packages`, and trims what iOS can't use. Run
+   `./Scripts/fetch-python.sh --check` any time to see what's in place. Nothing
+   it produces is committed.
+
+2. `open YTDLPHub.xcodeproj`
+3. Select the **YTDLPHub** target → **Signing & Capabilities**
+4. Set your **Team**, and change the bundle identifier from
    `com.example.ytdlphub` to something in your own namespace
-4. Pick your iPhone as the run destination and press ⌘R
+5. Pick your iPhone as the run destination and press ⌘R
 
-There are no package dependencies and nothing to install first.
+If you skip step 1, remove `Python.xcframework` from the target's Frameworks
+and Embed Frameworks phases and the app still builds — it just falls back to
+the built-in extractor, and Settings will say the bundled yt-dlp isn't
+included.
 
-The Simulator works for everything except Photos export. Downloads are real in
-the Simulator, so it's a fine place to test.
+To update yt-dlp later, re-run `./Scripts/fetch-python.sh` and rebuild.
+
+The Simulator works for everything except Photos export.
 
 ## Running the yt-dlp bridge (optional)
 
@@ -90,22 +117,30 @@ behind a reverse proxy.
 YTDLPHub/
   Models/          Value types: streams, plans, jobs, library entries
   Services/
-    InnerTube/     On-device extraction
+    EmbeddedPython/
+      YTDLPBridge.h/.m          CPython host; calls yt-dlp in-process
+      EmbeddedYTDLPResolver.swift
+    InnerTube/                  Hand-written YouTube extractor
       InnerTubeClient.swift     YouTube client identities to impersonate
       InnerTubeResolver.swift   Player API calls, format parsing
       PlayerScript.swift        JavaScriptCore host for URL unscrambling
       PlayerScriptParser.swift  Pulls functions out of YouTube's base.js
     RemoteResolver.swift        yt-dlp server bridge
+    YTDLPInfo.swift             Wire format shared by both yt-dlp resolvers
     StreamSelector.swift        "1080p" -> which files to fetch
     BackgroundDownloader.swift  URLSession background transfers
     MediaMerger.swift           AVFoundation remux of video + audio
     DownloadCoordinator.swift   Queue, state machine, crash recovery
-  Views/           SwiftUI screens
+  Views/                        SwiftUI screens
+  Resources/                    Vendored Python runtime lands here
+Scripts/
+  fetch-python.sh               Vendors CPython + yt-dlp into the app
+  ytdlp_bridge.py               Python side of the in-process bridge
 Server/
   ytdlp_hub_server.py           Companion extraction server
 ```
 
-Two design notes worth knowing before you change things:
+Design notes worth knowing before you change things:
 
 **Nothing is stored as an absolute path.** iOS moves the app container between
 installs, so `LibraryItem` records a path relative to `Paths.library` and
@@ -116,23 +151,32 @@ finish while the app is dead, so no state lives in memory: each task carries
 what it needs in `taskDescription`, jobs are persisted to `jobs.json`, and
 `DownloadCoordinator.recoverInterruptedJobs()` reconciles on launch.
 
+**The Python bridge never raises across the C boundary.** Exceptions lose their
+message there, so `ytdlp_bridge.py` returns JSON with an `error` key instead
+and `YTDLPInfo.classify` turns yt-dlp's prose back into a typed error.
+
+**Every call into CPython is serialised and takes the GIL.** One extraction
+runs at a time, on its own thread, which is all the app needs.
+
 ## Limitations
 
 - **Live streams** can't be saved as a file until the broadcast ends.
 - **Age-restricted, private, and members-only videos** need a signed-in
-  account. The on-device extractor doesn't sign in. Use the yt-dlp bridge with
+  account. Neither on-device resolver signs in. Use the yt-dlp bridge with
   `--cookies-from-browser` if you have legitimate access.
 - **Playlists** resolve to their first video. Queueing a whole playlist isn't
   implemented.
 - **VP9/AV1 and Opus** renditions are listed but not selected for merging —
   AVFoundation only remuxes MPEG-4 tracks, so the app sticks to H.264 + AAC.
   In practice this costs a little file size, not resolution.
-- **The on-device extractor will break, periodically.** YouTube reshapes its
+- **The built-in extractor will break, periodically.** YouTube reshapes its
   player regularly. `InnerTubeClient.swift` holds the client version strings
-  that go stale first; yt-dlp's `_extractor/youtube/_base.py` is the place to
-  read the current values from. Every extraction failure is non-fatal — the app
-  falls back through several clients and then to the bridge. This is the honest
-  tradeoff of doing extraction on-device, and the reason the bridge exists.
+  that go stale first; yt-dlp's `_extractor/youtube/_base.py` is where to read
+  the current values. This is why it sits last in the chain rather than first.
+- **`fetch-python.sh` is version-sensitive.** The Python-Apple-support release
+  layout has changed between Python versions. The script searches for the
+  pieces rather than assuming paths, but if a future release moves them again,
+  set `PYTHON_SUPPORT_URL` to the tarball you want.
 
 ## Before you ship this
 

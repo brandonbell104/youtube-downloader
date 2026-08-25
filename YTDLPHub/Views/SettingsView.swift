@@ -5,6 +5,8 @@ struct SettingsView: View {
     @EnvironmentObject private var library: LibraryStore
 
     @State private var serverStatus: ServerStatus = .unknown
+    @State private var bundledVersion: String?
+    @State private var checkedBundledVersion = false
 
     enum ServerStatus: Equatable {
         case unknown
@@ -24,6 +26,31 @@ struct SettingsView: View {
                     }
                     Toggle("Confirm before downloading", isOn: $settings.confirmBeforeDownloading)
                     Toggle("Also save videos to Photos", isOn: $settings.saveToPhotos)
+                }
+
+                Section {
+                    if settings.embeddedYTDLPAvailable {
+                        Toggle("Use the bundled yt-dlp", isOn: $settings.useEmbeddedYTDLP)
+                        LabeledContent("Version") {
+                            if checkedBundledVersion {
+                                Text(bundledVersion ?? "Unknown")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ProgressView().controlSize(.small)
+                            }
+                        }
+                    } else {
+                        Label("Not included in this build", systemImage: "shippingbox")
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Bundled yt-dlp")
+                } footer: {
+                    if settings.embeddedYTDLPAvailable {
+                        Text("yt-dlp runs inside the app, on this device. Update it by re-running Scripts/fetch-python.sh and rebuilding.")
+                    } else {
+                        Text("Run Scripts/fetch-python.sh and rebuild to bundle yt-dlp and a Python runtime into the app. Without it, extraction falls back to the built-in YouTube extractor.")
+                    }
                 }
 
                 Section {
@@ -52,7 +79,7 @@ struct SettingsView: View {
                 } header: {
                     Text("yt-dlp bridge")
                 } footer: {
-                    Text("iOS apps can't run yt-dlp — it's a command line program, and apps aren't allowed to launch other executables. Point this at a Mac, Raspberry Pi or server running the companion script and it will do the extraction; the download itself still happens on this device. Leave it off to use the built-in extractor.")
+                    Text("Point this at a Mac, Raspberry Pi or server running the companion script to do extraction there instead. Handy when you'd rather update yt-dlp with pip than rebuild the app. The download itself still happens on this device.")
                 }
 
                 Section {
@@ -73,6 +100,13 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .task {
+                guard !checkedBundledVersion else { return }
+                // Reading the version boots the interpreter, which takes a
+                // moment, so it happens off the main thread.
+                bundledVersion = await Task.detached { EmbeddedYTDLPResolver.version }.value
+                checkedBundledVersion = true
+            }
         }
     }
 
