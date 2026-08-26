@@ -39,10 +39,7 @@ jobs:
         id: python-cache
         uses: actions/cache@v4
         with:
-          path: |
-            Vendor
-            YTDLPHub/Resources/python-stdlib
-            YTDLPHub/Resources/python-packages
+          path: Vendor
           key: python-${{ runner.os }}-${{ hashFiles('Scripts/fetch-python.sh', 'Scripts/ytdlp_bridge.py') }}
 
       - name: Vendor Python and yt-dlp
@@ -61,8 +58,38 @@ jobs:
             -scheme YTDLPHub \
             -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee build.log
+
+      # A successful build is not proof the app actually contains yt-dlp: a
+      # missing resource reference produces a perfectly green build and an app
+      # that reports "bundled yt-dlp: not included" once installed. Check the
+      # bundle itself.
+      - name: Verify the embedded runtime made it into the app
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/dd/Build/Products/Debug-iphonesimulator/YTDLPHub.app"
+          [ -d "$app" ] || { echo "::error::No .app was produced at $app"; exit 1; }
+
+          missing=0
+          check() {
+            if [ -e "$app/$1" ]; then
+              echo "  ok       $1"
+            else
+              echo "::error::Missing from the app bundle: $1"
+              missing=1
+            fi
+          }
+          check "Frameworks/Python.framework"
+          check "python-stdlib/encodings/__init__.py"
+          check "python-packages/yt_dlp/YoutubeDL.py"
+          check "python-packages/ytdlp_bridge.py"
+          check "python-packages/certifi/cacert.pem"
+
+          echo
+          echo "App bundle size: $(du -sh "$app" | cut -f1)"
+          exit $missing
 
       - name: Collect compiler errors
         if: failure()

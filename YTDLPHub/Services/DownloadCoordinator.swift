@@ -15,10 +15,14 @@ final class DownloadCoordinator: ObservableObject {
     init(
         settings: AppSettings,
         library: LibraryStore,
-        downloader: BackgroundDownloader = .shared
+        downloader: BackgroundDownloader? = nil
     ) {
         self.settings = settings
         self.library = library
+        // Resolved here rather than as a default argument: default argument
+        // expressions are evaluated in a nonisolated context, and reaching a
+        // main-actor singleton from one is an error under Swift 6.
+        let downloader = downloader ?? .shared
         self.downloader = downloader
         loadJobs()
         downloader.delegate = self

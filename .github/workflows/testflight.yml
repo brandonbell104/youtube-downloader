@@ -67,10 +67,7 @@ jobs:
         id: python-cache
         uses: actions/cache@v4
         with:
-          path: |
-            Vendor
-            YTDLPHub/Resources/python-stdlib
-            YTDLPHub/Resources/python-packages
+          path: Vendor
           key: python-${{ runner.os }}-${{ hashFiles('Scripts/fetch-python.sh', 'Scripts/ytdlp_bridge.py') }}
 
       - name: Vendor Python and yt-dlp

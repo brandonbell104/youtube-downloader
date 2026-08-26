@@ -6,9 +6,9 @@
 # pure-Python source into an interpreter that shipped inside the app bundle.
 # This script assembles that:
 #
-#   Vendor/Python.xcframework            the interpreter, linked and embedded
-#   YTDLPHub/Resources/python-stdlib     the standard library, copied verbatim
-#   YTDLPHub/Resources/python-packages   yt-dlp, certifi, and the bridge module
+#   Vendor/Python.xcframework   the interpreter, linked and embedded
+#   Vendor/python-stdlib        the standard library, copied into the bundle
+#   Vendor/python-packages      yt-dlp, certifi, and the bridge module
 #
 # Run it once before the first build, and again whenever you want a newer
 # yt-dlp. Everything it produces is gitignored.
@@ -30,9 +30,9 @@ PYTHON_SUPPORT_URL="${PYTHON_SUPPORT_URL:-https://github.com/beeware/Python-Appl
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENDOR="${ROOT}/Vendor"
-RESOURCES="${ROOT}/YTDLPHub/Resources"
-STDLIB_DEST="${RESOURCES}/python-stdlib"
-PACKAGES_DEST="${RESOURCES}/python-packages"
+RESOURCES="${VENDOR}"
+STDLIB_DEST="${VENDOR}/python-stdlib"
+PACKAGES_DEST="${VENDOR}/python-packages"
 FRAMEWORK_DEST="${VENDOR}/Python.xcframework"
 
 say()  { printf '\033[1m==>\033[0m %s\n' "$*"; }

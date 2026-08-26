@@ -73,7 +73,7 @@ to run it on your own device).
    ```
 
    This downloads a CPython build for iOS, installs yt-dlp and certifi into
-   `YTDLPHub/Resources/python-packages`, and trims what iOS can't use. Run
+   `Vendor/python-packages`, and trims what iOS can't use. Run
    `./Scripts/fetch-python.sh --check` any time to see what's in place. Nothing
    it produces is committed.
 
@@ -132,7 +132,7 @@ YTDLPHub/
     MediaMerger.swift           AVFoundation remux of video + audio
     DownloadCoordinator.swift   Queue, state machine, crash recovery
   Views/                        SwiftUI screens
-  Resources/                    Vendored Python runtime lands here
+Vendor/                         Vendored runtime (gitignored, script-created)
 Scripts/
   fetch-python.sh               Vendors CPython + yt-dlp into the app
   ytdlp_bridge.py               Python side of the in-process bridge

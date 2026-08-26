@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		1A0000000000000000000011 /* Python.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000010 /* Python.xcframework */; };
 		1A0000000000000000000012 /* Python.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000010 /* Python.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		1A0000000000000000000017 /* python-stdlib in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000015 /* python-stdlib */; };
+		1A0000000000000000000018 /* python-packages in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000016 /* python-packages */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -27,14 +29,13 @@
 
 /* Begin PBXFileReference section */
 		1A0000000000000000000010 /* Python.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Python.xcframework; path = Vendor/Python.xcframework; sourceTree = SOURCE_ROOT; };
+		1A0000000000000000000015 /* python-stdlib */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "python-stdlib"; path = "Vendor/python-stdlib"; sourceTree = SOURCE_ROOT; };
+		1A0000000000000000000016 /* python-packages */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "python-packages"; path = "Vendor/python-packages"; sourceTree = SOURCE_ROOT; };
 		1A0000000000000000000001 /* YTDLPHub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = YTDLPHub.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		1A0000000000000000000002 /* YTDLPHub */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (
-				"Resources/python-stdlib",
-				"Resources/python-packages",
-			); path = YTDLPHub; sourceTree = "<group>"; };
+		1A0000000000000000000002 /* YTDLPHub */ = {isa = PBXFileSystemSynchronizedRootGroup; path = YTDLPHub; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -62,6 +63,8 @@
 			isa = PBXGroup;
 			children = (
 				1A0000000000000000000010 /* Python.xcframework */,
+				1A0000000000000000000015 /* python-stdlib */,
+				1A0000000000000000000016 /* python-packages */,
 			);
 			name = Vendor;
 			sourceTree = "<group>";
@@ -139,6 +142,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A0000000000000000000017 /* python-stdlib in Resources */,
+				1A0000000000000000000018 /* python-packages in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
