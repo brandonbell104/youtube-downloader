@@ -108,15 +108,43 @@ App Store Connect → **Membership details**. It's a 10-character string like
 ### 5. Add the secrets to GitHub
 
 Repository → **Settings** → **Secrets and variables** → **Actions** → **New
-repository secret**, five times:
+repository secret**.
 
-| Secret | Value |
-|---|---|
-| `APPSTORE_ISSUER_ID` | Issuer ID from step 3 |
-| `APPSTORE_KEY_ID` | Key ID from step 3 |
-| `APPSTORE_PRIVATE_KEY` | The entire `.p8` file contents, including the `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----` lines |
-| `APPLE_TEAM_ID` | Team ID from step 4 |
-| `APP_BUNDLE_ID` | The bundle ID from step 1 |
+That page has **two** fields, and the large text box is the second one:
+
+- **Name** — a small input at the top. Type the name exactly as written below;
+  it is case-sensitive and the workflow looks for these literal strings.
+- **Secret** — the large box. The raw value only: no quotes, no `NAME=` prefix,
+  no JSON.
+
+Fill both, click **Add secret**, then click **New repository secret** again for
+the next one. These are five separate secrets, not one combined value.
+
+| Name | Value | Shape |
+|---|---|---|
+| `APPSTORE_ISSUER_ID` | Issuer ID from step 3 | `69a6de70-1234-47e3-e053-5b8c7c11a4d1` |
+| `APPSTORE_KEY_ID` | Key ID from step 3 | `ABC123DEFG` |
+| `APPSTORE_PRIVATE_KEY` | The whole `.p8` file | multi-line PEM, below |
+| `APPLE_TEAM_ID` | Team ID from step 4 | `A1B2C3D4E5` |
+| `APP_BUNDLE_ID` | Bundle ID from step 1 | `com.brandonbell.ytdlphub` |
+
+The Key ID is the short one beside the key in the list. The Issuer ID is the
+long UUID printed once above the table — they are easy to swap by mistake.
+
+For `APPSTORE_PRIVATE_KEY`, open `AuthKey_XXXXXXXXXX.p8` in a text editor and
+paste all of it, first and last lines included:
+
+```
+-----BEGIN PRIVATE KEY-----
+MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQg...
+-----END PRIVATE KEY-----
+```
+
+Multi-line values are fine. If nothing on your machine will open a `.p8`,
+rename it to `.txt`, or `cat` it inside a Codespace.
+
+A saved secret can never be read back, only overwritten. If you are unsure a
+value is right, add it again under the same name to replace it.
 
 The bundle ID is passed to `xcodebuild` on the command line, so there is
 nothing to edit in the project.

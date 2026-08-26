@@ -10,6 +10,11 @@ name: Build
 on:
   push:
     branches: ["**"]
+    # macOS runners bill at 10x, so documentation pushes should not trigger one.
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".gitignore"
   pull_request:
   workflow_dispatch:
 
