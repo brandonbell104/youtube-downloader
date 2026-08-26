@@ -1,0 +1,164 @@
+name: TestFlight
+
+# Signs the app and uploads it to TestFlight, where it installs onto your
+# phone through the TestFlight app — no Mac and no cable involved.
+#
+# Signing is handled by xcodebuild's -allowProvisioningUpdates using an App
+# Store Connect API key, so the certificate and provisioning profile are
+# created on Apple's side automatically. That is what makes this possible
+# without ever exporting a .p12 from a Mac.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#
+#   APPSTORE_ISSUER_ID    App Store Connect -> Users and Access -> Integrations
+#   APPSTORE_KEY_ID       the key's ID, from the same page
+#   APPSTORE_PRIVATE_KEY  the whole AuthKey_XXXX.p8 file, pasted in
+#   APPLE_TEAM_ID         App Store Connect -> Membership details
+#   APP_BUNDLE_ID         e.g. com.brandonbell.ytdlphub
+#
+# The bundle ID must already exist as an app record in App Store Connect.
+# See docs/SHIPPING.md for the one-time setup.
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "What changed in this build"
+        required: false
+        default: "Development build"
+
+jobs:
+  testflight:
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    env:
+      BUNDLE_ID: ${{ secrets.APP_BUNDLE_ID }}
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+      ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the secrets are set
+        run: |
+          missing=0
+          for name in BUNDLE_ID TEAM_ID KEY_ID ISSUER_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Secret for ${name} is not set. See docs/SHIPPING.md."
+              missing=1
+            fi
+          done
+          if [ -z "${{ secrets.APPSTORE_PRIVATE_KEY }}" ]; then
+            echo "::error::Secret APPSTORE_PRIVATE_KEY is not set. See docs/SHIPPING.md."
+            missing=1
+          fi
+          exit ${missing}
+
+      - name: Select the newest Xcode
+        run: |
+          set -euo pipefail
+          latest="$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          sudo xcode-select -s "${latest}/Contents/Developer"
+          xcodebuild -version
+
+      - name: Restore vendored Python
+        id: python-cache
+        uses: actions/cache@v4
+        with:
+          path: Vendor
+          key: python-${{ runner.os }}-${{ hashFiles('Scripts/fetch-python.sh', 'Scripts/ytdlp_bridge.py') }}
+
+      - name: Vendor Python and yt-dlp
+        if: steps.python-cache.outputs.cache-hit != 'true'
+        run: ./Scripts/fetch-python.sh
+
+      - name: Install the App Store Connect key
+        run: |
+          set -euo pipefail
+          # altool and xcodebuild both look for the key by ID in this directory.
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s' "${{ secrets.APPSTORE_PRIVATE_KEY }}" > ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8
+          chmod 600 ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8
+
+      - name: Archive
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project YTDLPHub.xcodeproj \
+            -scheme YTDLPHub \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/YTDLPHub.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8 \
+            -authenticationKeyID "${KEY_ID}" \
+            -authenticationKeyIssuerID "${ISSUER_ID}" \
+            PRODUCT_BUNDLE_IDENTIFIER="${BUNDLE_ID}" \
+            DEVELOPMENT_TEAM="${TEAM_ID}" \
+            CODE_SIGN_STYLE=Automatic \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            2>&1 | tee archive.log
+
+      - name: Export the .ipa
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>destination</key>
+            <string>export</string>
+            <key>teamID</key>
+            <string>${TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>uploadSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/YTDLPHub.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8 \
+            -authenticationKeyID "${KEY_ID}" \
+            -authenticationKeyIssuerID "${ISSUER_ID}"
+
+      - name: Upload to TestFlight
+        run: |
+          set -euo pipefail
+          ipa="$(find "$RUNNER_TEMP/export" -name '*.ipa' | head -1)"
+          echo "Uploading ${ipa}"
+          xcrun altool --upload-app \
+            --type ios \
+            --file "${ipa}" \
+            --apiKey "${KEY_ID}" \
+            --apiIssuer "${ISSUER_ID}"
+
+      - name: Summary
+        run: |
+          {
+            echo "## Uploaded build ${{ github.run_number }}"
+            echo
+            echo "${{ inputs.notes }}"
+            echo
+            echo "Apple takes a few minutes to process it. When the email arrives, open TestFlight on your phone and install."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testflight-logs
+          path: |
+            archive.log
+          retention-days: 7
+          if-no-files-found: ignore

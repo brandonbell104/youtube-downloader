@@ -1,0 +1,136 @@
+name: Build
+
+# Compiles the app on a macOS runner. No Apple account, no signing, no
+# artifacts — this exists purely to tell us whether the code builds, which is
+# the loop you need when there's no Mac to try it on.
+#
+# Compiler errors are pulled out into the run summary so they can be copied
+# straight back into a conversation.
+
+on:
+  push:
+    branches: ["**"]
+    # macOS runners bill at 10x, so documentation pushes should not trigger one.
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".gitignore"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select the newest Xcode
+        run: |
+          set -euo pipefail
+          latest="$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          echo "Using ${latest}"
+          sudo xcode-select -s "${latest}/Contents/Developer"
+          xcodebuild -version
+
+      # The vendored runtime is ~50 MB and never changes unless the script
+      # does, so it is worth keeping between runs.
+      - name: Restore vendored Python
+        id: python-cache
+        uses: actions/cache@v4
+        with:
+          path: Vendor
+          key: python-${{ runner.os }}-${{ hashFiles('Scripts/fetch-python.sh', 'Scripts/ytdlp_bridge.py') }}
+
+      - name: Vendor Python and yt-dlp
+        if: steps.python-cache.outputs.cache-hit != 'true'
+        run: ./Scripts/fetch-python.sh
+
+      - name: Check what was vendored
+        run: ./Scripts/fetch-python.sh --check
+
+      - name: Build for the simulator
+        id: compile
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project YTDLPHub.xcodeproj \
+            -scheme YTDLPHub \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build.log
+
+      # A successful build is not proof the app actually contains yt-dlp: a
+      # missing resource reference produces a perfectly green build and an app
+      # that reports "bundled yt-dlp: not included" once installed. Check the
+      # bundle itself.
+      - name: Verify the embedded runtime made it into the app
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/dd/Build/Products/Debug-iphonesimulator/YTDLPHub.app"
+          [ -d "$app" ] || { echo "::error::No .app was produced at $app"; exit 1; }
+
+          missing=0
+          check() {
+            if [ -e "$app/$1" ]; then
+              echo "  ok       $1"
+            else
+              echo "::error::Missing from the app bundle: $1"
+              missing=1
+            fi
+          }
+          check "Frameworks/Python.framework"
+          check "python-stdlib/encodings/__init__.py"
+          check "python-packages/yt_dlp/YoutubeDL.py"
+          check "python-packages/ytdlp_bridge.py"
+          check "python-packages/certifi/cacert.pem"
+
+          # yt-dlp needs these binary modules, and they are architecture
+          # specific -- a simulator build carrying device .so files would look
+          # fine here and fail at import time.
+          for module in _ssl _socket zlib binascii; do
+            if ls "$app/python-stdlib/lib-dynload/${module}."*.so >/dev/null 2>&1; then
+              echo "  ok       lib-dynload/${module}"
+            else
+              echo "::error::Missing binary module: ${module}"
+              missing=1
+            fi
+          done
+          if ls "$app/python-stdlib/lib-dynload/"*iphonesimulator.so >/dev/null 2>&1; then
+            echo "  ok       lib-dynload built for the simulator"
+          else
+            echo "::error::lib-dynload is not the simulator slice"
+            missing=1
+          fi
+
+          echo
+          echo "App bundle size: $(du -sh "$app" | cut -f1)"
+          exit $missing
+
+      - name: Collect compiler errors
+        if: failure()
+        run: |
+          {
+            echo "## Build failed"
+            echo
+            echo '```'
+            # Xcode prefixes diagnostics with the file and line; a little
+            # context on each makes them readable without the full log.
+            grep -E '(error|warning): ' build.log | sort -u | head -60 || echo "No diagnostics matched — see the full log artifact."
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the full log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7
