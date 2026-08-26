@@ -6,8 +6,9 @@
 # pure-Python source into an interpreter that shipped inside the app bundle.
 # This script assembles that:
 #
-#   Vendor/Python.xcframework   the interpreter, linked and embedded
-#   Vendor/python-stdlib        the standard library, copied into the bundle
+#   Vendor/Python.xcframework   the interpreter, linked and embedded. Each
+#                               slice carries its own copy of the standard
+#                               library; a build phase installs the right one.
 #   Vendor/python-packages      yt-dlp, certifi, and the bridge module
 #
 # Run it once before the first build, and again whenever you want a newer
@@ -30,10 +31,20 @@ PYTHON_SUPPORT_URL="${PYTHON_SUPPORT_URL:-https://github.com/beeware/Python-Appl
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENDOR="${ROOT}/Vendor"
-RESOURCES="${VENDOR}"
-STDLIB_DEST="${VENDOR}/python-stdlib"
 PACKAGES_DEST="${VENDOR}/python-packages"
 FRAMEWORK_DEST="${VENDOR}/Python.xcframework"
+
+# The standard library lives beside each slice's framework, as
+# <slice>/lib/python3.x. Note the sibling <slice>/include/python3.x holds C
+# headers, not modules -- matching on the name alone picks the wrong one.
+slice_stdlib() {
+    local slice="$1"
+    local found
+    found="$(find "${FRAMEWORK_DEST}/${slice}/lib" -maxdepth 1 -type d -name 'python3.*' 2>/dev/null | head -1)"
+    [[ -n "${found}" ]] && printf '%s' "${found}"
+}
+
+device_stdlib() { slice_stdlib "ios-arm64"; }
 
 say()  { printf '\033[1m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m warning:\033[0m %s\n' "$*" >&2; }
@@ -48,10 +59,12 @@ report_status() {
     else
         warn "Python.xcframework missing"; ok=1
     fi
-    if [[ -d "${STDLIB_DEST}" ]]; then
-        say "python-stdlib present ($(du -sh "${STDLIB_DEST}" | cut -f1))"
+    local stdlib
+    stdlib="$(device_stdlib || true)"
+    if [[ -n "${stdlib}" && -f "${stdlib}/encodings/__init__.py" ]]; then
+        say "standard library present ($(du -sh "${stdlib}" | cut -f1) per slice)"
     else
-        warn "python-stdlib missing"; ok=1
+        warn "standard library missing or incomplete"; ok=1
     fi
     if [[ -d "${PACKAGES_DEST}/yt_dlp" ]]; then
         local version
@@ -95,32 +108,26 @@ else
 
     # The tarball's internal layout has moved between releases, so find the
     # pieces rather than assuming where they are.
-    FRAMEWORK_SRC="$(find "${TMP}/unpacked" -maxdepth 3 -type d -name 'Python.xcframework' | head -1)"
+    FRAMEWORK_SRC="$(find "${TMP}/unpacked" -maxdepth 2 -type d -name 'Python.xcframework' | head -1)"
     [[ -n "${FRAMEWORK_SRC}" ]] || die "No Python.xcframework inside the tarball."
-
-    STDLIB_SRC="$(find "${TMP}/unpacked" -maxdepth 5 -type d -name 'python-stdlib' | head -1)"
-    if [[ -z "${STDLIB_SRC}" ]]; then
-        # Older layouts ship the stdlib as lib/python3.x inside the device slice.
-        STDLIB_SRC="$(find "${FRAMEWORK_SRC}" -maxdepth 4 -type d -name "python${PYTHON_VERSION}" \
-            -path '*ios-arm64*' ! -path '*simulator*' | head -1)"
-    fi
-    [[ -n "${STDLIB_SRC}" ]] || die "Could not locate the standard library in the tarball."
 
     mkdir -p "${VENDOR}"
     rm -rf "${FRAMEWORK_DEST}"
     cp -R "${FRAMEWORK_SRC}" "${FRAMEWORK_DEST}"
 
-    mkdir -p "${RESOURCES}"
-    rm -rf "${STDLIB_DEST}"
-    cp -R "${STDLIB_SRC}" "${STDLIB_DEST}"
-
     say "Trimming the standard library"
-    # None of this can run on iOS, and it is a third of the download.
-    for unwanted in test tests idlelib tkinter turtledemo lib2to3 ensurepip pydoc_data; do
-        rm -rf "${STDLIB_DEST:?}/${unwanted}"
+    # Both slices are trimmed, because either may be the one installed into
+    # the bundle. `test` alone is a third of the download.
+    for slice in ios-arm64 ios-arm64_x86_64-simulator; do
+        stdlib="$(slice_stdlib "${slice}" || true)"
+        [[ -n "${stdlib}" ]] || die "No standard library in the ${slice} slice."
+        for unwanted in test tests idlelib tkinter turtledemo lib2to3 ensurepip pydoc_data; do
+            rm -rf "${stdlib:?}/${unwanted}"
+        done
+        find "${stdlib}" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+        find "${stdlib}" -name '*.pyc' -delete 2>/dev/null || true
+        say "  ${slice}: $(du -sh "${stdlib}" | cut -f1)"
     done
-    find "${STDLIB_DEST}" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
-    find "${STDLIB_DEST}" -name '*.pyc' -delete 2>/dev/null || true
 
     rm -rf "${TMP}"
     trap - EXIT

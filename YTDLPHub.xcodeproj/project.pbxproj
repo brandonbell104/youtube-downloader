@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		1A0000000000000000000011 /* Python.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000010 /* Python.xcframework */; };
 		1A0000000000000000000012 /* Python.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000010 /* Python.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		1A0000000000000000000017 /* python-stdlib in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000015 /* python-stdlib */; };
 		1A0000000000000000000018 /* python-packages in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000016 /* python-packages */; };
 /* End PBXBuildFile section */
 
@@ -29,7 +28,6 @@
 
 /* Begin PBXFileReference section */
 		1A0000000000000000000010 /* Python.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Python.xcframework; path = Vendor/Python.xcframework; sourceTree = SOURCE_ROOT; };
-		1A0000000000000000000015 /* python-stdlib */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "python-stdlib"; path = "Vendor/python-stdlib"; sourceTree = SOURCE_ROOT; };
 		1A0000000000000000000016 /* python-packages */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "python-packages"; path = "Vendor/python-packages"; sourceTree = SOURCE_ROOT; };
 		1A0000000000000000000001 /* YTDLPHub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = YTDLPHub.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -63,7 +61,6 @@
 			isa = PBXGroup;
 			children = (
 				1A0000000000000000000010 /* Python.xcframework */,
-				1A0000000000000000000015 /* python-stdlib */,
 				1A0000000000000000000016 /* python-packages */,
 			);
 			name = Vendor;
@@ -88,6 +85,7 @@
 				1A0000000000000000000003 /* Frameworks */,
 				1A0000000000000000000009 /* Resources */,
 				1A0000000000000000000014 /* Embed Frameworks */,
+				1A0000000000000000000019 /* Install the Python standard library */,
 			);
 			buildRules = (
 			);
@@ -137,12 +135,33 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		1A0000000000000000000019 /* Install the Python standard library */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Install the Python standard library";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\n\n# The Python standard library ships once per xcframework slice, and\n# lib-dynload holds ~70 binary extension modules built for one architecture\n# each (*.cpython-3x-iphoneos.so vs *-iphonesimulator.so). A single copied\n# folder cannot serve both, so the matching slice is installed here.\n\ncase \"${PLATFORM_NAME}\" in\n  iphoneos)        SLICE=\"ios-arm64\" ;;\n  iphonesimulator) SLICE=\"ios-arm64_x86_64-simulator\" ;;\n  *) echo \"error: unsupported platform ${PLATFORM_NAME}\"; exit 1 ;;\nesac\n\nSRC=\"$(find \"${PROJECT_DIR}/Vendor/Python.xcframework/${SLICE}/lib\" -maxdepth 1 -type d -name \"python3.*\" 2>/dev/null | head -1)\"\nif [ -z \"${SRC}\" ] || [ ! -f \"${SRC}/encodings/__init__.py\" ]; then\n  echo \"error: no Python standard library for ${SLICE}. Run Scripts/fetch-python.sh.\"\n  exit 1\nfi\n\nDEST=\"${CODESIGNING_FOLDER_PATH}/python-stdlib\"\nmkdir -p \"${DEST}\"\nrsync -a --delete \"${SRC}/\" \"${DEST}/\"\n\n# Binary modules must carry the app's signature to load on a device.\nif [ \"${CODE_SIGNING_REQUIRED:-NO}\" = \"YES\" ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ]; then\n  find \"${DEST}\" -name \"*.so\" -print0 | while IFS= read -r -d \"\" module; do\n    codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" \\\n      --preserve-metadata=identifier,entitlements,flags \"${module}\"\n  done\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXResourcesBuildPhase section */
 		1A0000000000000000000009 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1A0000000000000000000017 /* python-stdlib in Resources */,
 				1A0000000000000000000018 /* python-packages in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -178,7 +197,7 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -220,7 +239,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_UNDECLARED_SELECTOR = YES;

@@ -87,6 +87,24 @@ jobs:
           check "python-packages/ytdlp_bridge.py"
           check "python-packages/certifi/cacert.pem"
 
+          # yt-dlp needs these binary modules, and they are architecture
+          # specific -- a simulator build carrying device .so files would look
+          # fine here and fail at import time.
+          for module in _ssl _socket zlib binascii; do
+            if ls "$app/python-stdlib/lib-dynload/${module}."*.so >/dev/null 2>&1; then
+              echo "  ok       lib-dynload/${module}"
+            else
+              echo "::error::Missing binary module: ${module}"
+              missing=1
+            fi
+          done
+          if ls "$app/python-stdlib/lib-dynload/"*iphonesimulator.so >/dev/null 2>&1; then
+            echo "  ok       lib-dynload built for the simulator"
+          else
+            echo "::error::lib-dynload is not the simulator slice"
+            missing=1
+          fi
+
           echo
           echo "App bundle size: $(du -sh "$app" | cut -f1)"
           exit $missing
