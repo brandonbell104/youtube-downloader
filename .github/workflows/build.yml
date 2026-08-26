@@ -1,0 +1,86 @@
+name: Build
+
+# Compiles the app on a macOS runner. No Apple account, no signing, no
+# artifacts — this exists purely to tell us whether the code builds, which is
+# the loop you need when there's no Mac to try it on.
+#
+# Compiler errors are pulled out into the run summary so they can be copied
+# straight back into a conversation.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select the newest Xcode
+        run: |
+          set -euo pipefail
+          latest="$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          echo "Using ${latest}"
+          sudo xcode-select -s "${latest}/Contents/Developer"
+          xcodebuild -version
+
+      # The vendored runtime is ~50 MB and never changes unless the script
+      # does, so it is worth keeping between runs.
+      - name: Restore vendored Python
+        id: python-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            Vendor
+            YTDLPHub/Resources/python-stdlib
+            YTDLPHub/Resources/python-packages
+          key: python-${{ runner.os }}-${{ hashFiles('Scripts/fetch-python.sh', 'Scripts/ytdlp_bridge.py') }}
+
+      - name: Vendor Python and yt-dlp
+        if: steps.python-cache.outputs.cache-hit != 'true'
+        run: ./Scripts/fetch-python.sh
+
+      - name: Check what was vendored
+        run: ./Scripts/fetch-python.sh --check
+
+      - name: Build for the simulator
+        id: compile
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project YTDLPHub.xcodeproj \
+            -scheme YTDLPHub \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build.log
+
+      - name: Collect compiler errors
+        if: failure()
+        run: |
+          {
+            echo "## Build failed"
+            echo
+            echo '```'
+            # Xcode prefixes diagnostics with the file and line; a little
+            # context on each makes them readable without the full log.
+            grep -E '(error|warning): ' build.log | sort -u | head -60 || echo "No diagnostics matched — see the full log artifact."
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the full log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7
