@@ -131,6 +131,11 @@ the next one. These are five separate secrets, not one combined value.
 The Key ID is the short one beside the key in the list. The Issuer ID is the
 long UUID printed once above the table — they are easy to swap by mistake.
 
+Copying an ID from Apple's pages often takes the line break with it. The
+workflow trims whitespace and checks the shape of each value before it starts
+building, so a stray newline is handled and a swapped ID fails in seconds
+rather than part-way through an archive.
+
 For `APPSTORE_PRIVATE_KEY`, open `AuthKey_XXXXXXXXXX.p8` in a text editor and
 paste all of it, first and last lines included:
 
