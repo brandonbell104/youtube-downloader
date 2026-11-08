@@ -41,19 +41,50 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check the secrets are set
+      # Copying an ID from Apple's web pages usually takes the line break with
+      # it, and a team ID with a trailing newline matches no team: xcodebuild
+      # fails with `No Account for Team "ABCDE12345\n"` a minute into the
+      # archive. Trim here rather than relying on a clean paste, and check the
+      # shapes while it costs seconds instead of runner minutes.
+      - name: Normalise and check the secrets
         run: |
           missing=0
+
           for name in BUNDLE_ID TEAM_ID KEY_ID ISSUER_ID; do
-            if [ -z "${!name}" ]; then
+            raw="${!name}"
+            if [ -z "${raw}" ]; then
               echo "::error::Secret for ${name} is not set. See docs/SHIPPING.md."
               missing=1
+              continue
             fi
+            clean="$(printf '%s' "${raw}" | tr -d '[:space:]')"
+            if [ "${clean}" != "${raw}" ]; then
+              echo "note: trimmed whitespace from ${name}"
+            fi
+            echo "${name}=${clean}" >> "$GITHUB_ENV"
+            printf -v "${name}" '%s' "${clean}"
           done
+
           if [ -z "${{ secrets.APPSTORE_PRIVATE_KEY }}" ]; then
             echo "::error::Secret APPSTORE_PRIVATE_KEY is not set. See docs/SHIPPING.md."
             missing=1
           fi
+
+          # Shapes are stable enough to check, and a wrong one here saves a
+          # failed archive. Lengths are safe to print; the values are masked.
+          shape() {
+            local name="$1" value="$2" pattern="$3" expected="$4"
+            [ -z "${value}" ] && return 0
+            if ! printf '%s' "${value}" | grep -qE "${pattern}"; then
+              echo "::error::${name} doesn't look right (${#value} characters). Expected ${expected}. See docs/SHIPPING.md."
+              return 1
+            fi
+          }
+          shape TEAM_ID   "${TEAM_ID}"   '^[A-Z0-9]{10}$' "10 letters and digits, e.g. A1B2C3D4E5" || missing=1
+          shape KEY_ID    "${KEY_ID}"    '^[A-Z0-9]{10}$' "10 letters and digits, e.g. ABC123DEFG" || missing=1
+          shape ISSUER_ID "${ISSUER_ID}" '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$' "a UUID with dashes -- the long one above the key table, not the Key ID" || missing=1
+          shape BUNDLE_ID "${BUNDLE_ID}" '^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z0-9.-]+$' "reverse-DNS, e.g. com.yourname.ytdlphub" || missing=1
+
           exit ${missing}
 
       - name: Select the newest Xcode
@@ -78,9 +109,9 @@ jobs:
         run: |
           set -euo pipefail
           # altool and xcodebuild both look for the key by ID in this directory.
-          mkdir -p ~/.appstoreconnect/private_keys
-          printf '%s' "${{ secrets.APPSTORE_PRIVATE_KEY }}" > ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8
-          chmod 600 ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          printf '%s' "${{ secrets.APPSTORE_PRIVATE_KEY }}" > "$HOME/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8"
+          chmod 600 "$HOME/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8"
 
       - name: Archive
         run: |
@@ -92,7 +123,7 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/YTDLPHub.xcarchive" \
             -allowProvisioningUpdates \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8 \
+            -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8" \
             -authenticationKeyID "${KEY_ID}" \
             -authenticationKeyIssuerID "${ISSUER_ID}" \
             PRODUCT_BUNDLE_IDENTIFIER="${BUNDLE_ID}" \
@@ -128,7 +159,7 @@ jobs:
             -exportPath "$RUNNER_TEMP/export" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
             -allowProvisioningUpdates \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8 \
+            -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8" \
             -authenticationKeyID "${KEY_ID}" \
             -authenticationKeyIssuerID "${ISSUER_ID}"
 
